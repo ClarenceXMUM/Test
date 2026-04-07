@@ -1,0 +1,44 @@
+{
+  "applicationId": "org.doocs.md-editor",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "url": "/",
+  "documentRoot": "/resources/dist/",
+  "enableServer": true,
+  "tokenSecurity": "one-time",
+  "enableNativeAPI": true,
+  "nativeAllowList": [
+    "app.*",
+    "os.*",
+    "filesystem.*",
+    "storage.*",
+    "window.*",
+    "events.*"
+  ],
+  "modes": {
+    "window": {
+      "title": "微信 Markdown 编辑器",
+      "width": 1200,
+      "height": 780,
+      "minWidth": 800,
+      "minHeight": 600,
+      "center": true,
+      "icon": "/resources/icons/appIcon.png",
+      "injectClientLibrary": true,
+      "enableInspector": false,
+      "exitProcessOnClose": true
+    }
+  },
+  "cli": {
+    "binaryName": "md-editor",
+    "resourcesPath": "/resources/",
+    "clientLibrary": "/resources/js/neutralino.js",
+    "distributionPath": "/dist/",
+    "frontendLibrary": {
+      "projectPath": "../web",
+      "documentRoot": "/resources/dist/"
+    },
+    "binaryVersion": "6.7.0",
+    "clientVersion": "6.7.0"
+  }
+}
