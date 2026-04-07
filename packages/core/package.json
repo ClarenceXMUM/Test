@@ -1,0 +1,30 @@
+{
+  "name": "@md/core",
+  "type": "module",
+  "version": "2.1.0",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts",
+    "./renderer": "./src/renderer/index.ts",
+    "./extensions": "./src/extensions/index.ts",
+    "./utils": "./src/utils/index.ts",
+    "./theme": "./src/theme/index.ts"
+  },
+  "dependencies": {
+    "@antv/infographic": "^0.2.16",
+    "@md/shared": "workspace:*",
+    "es-toolkit": "^1.45.1",
+    "fflate": "^0.8.2",
+    "front-matter": "^4.0.2",
+    "highlight.js": "^11.11.1",
+    "isomorphic-dompurify": "^3.7.1",
+    "marked": "^17.0.6",
+    "mermaid": "^11.14.0",
+    "postcss": "^8.5.8",
+    "postcss-calc": "^10.1.1",
+    "postcss-custom-properties": "^15.0.1"
+  },
+  "devDependencies": {
+    "@md/config": "workspace:*"
+  }
+}
