@@ -1,3 +1,54 @@
+/* ── Data section ────────────────────────────────────────────────────────────── */
+.data-section {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.data-section__desc {
+  font-size: 13px;
+  color: #6e6e73;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.data-section__btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.data-section__btn {
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  color: #007AFF;
+  background: rgba(0,122,255,0.08);
+  border: 1px solid rgba(0,122,255,0.2);
+  border-radius: 10px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.data-section__btn:hover { background: rgba(0,122,255,0.14); }
+.data-section__btn:disabled { opacity: 0.5; cursor: default; }
+
+.data-section__btn--secondary {
+  color: #6e6e73;
+  background: rgba(0,0,0,0.04);
+  border-color: rgba(0,0,0,0.08);
+}
+
+.data-section__btn--secondary:hover { background: rgba(0,0,0,0.08); }
+
+.data-section__status {
+  font-size: 13px;
+  color: #34C759;
+  margin: 0;
+}
+
 /* ── Profile card shell ──────────────────────────────────────────────────────── */
 .profile-card {
   background: #ffffff;

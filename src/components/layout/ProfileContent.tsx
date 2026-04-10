@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getAllGoals, saveGoal, deleteGoal } from '../../lib/db'
+import { getAllGoals, saveGoal, deleteGoal, exportAllFiles, importFromFolder } from '../../lib/db'
 import { GoalEntry, GoalDistance, GoalField } from '../../types/training'
 import './Content.css'
 import './ProfileContent.css'
@@ -175,6 +175,61 @@ function GoalSection() {
   )
 }
 
+// ─── Data management section ──────────────────────────────────────────────────
+
+function DataSection() {
+  const [status, setStatus] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  async function handleExport() {
+    setBusy(true)
+    setStatus(null)
+    try {
+      const dest = await window.showDirectoryPicker({ mode: 'readwrite' })
+      const n = await exportAllFiles(dest)
+      setStatus(`已导出 ${n} 个文件到「${dest.name}」`)
+    } catch (e: unknown) {
+      if ((e as Error).name !== 'AbortError') setStatus('导出失败：' + (e as Error).message)
+    } finally {
+      setBusy(false)
+      setTimeout(() => setStatus(null), 5000)
+    }
+  }
+
+  async function handleImport() {
+    setBusy(true)
+    setStatus(null)
+    try {
+      const src = await window.showDirectoryPicker({ mode: 'read' })
+      const n = await importFromFolder(src)
+      setStatus(`已导入 ${n} 个文件，请刷新「训练总览」查看`)
+    } catch (e: unknown) {
+      if ((e as Error).name !== 'AbortError') setStatus('导入失败：' + (e as Error).message)
+    } finally {
+      setBusy(false)
+      setTimeout(() => setStatus(null), 5000)
+    }
+  }
+
+  return (
+    <div className="data-section">
+      <p className="data-section__desc">
+        训练数据存储在浏览器私有空间中，不受文件夹权限限制。<br />
+        可随时备份到本地文件夹，或从备份恢复。
+      </p>
+      <div className="data-section__btns">
+        <button className="data-section__btn" onClick={handleExport} disabled={busy}>
+          📂 打开/备份数据文件夹
+        </button>
+        <button className="data-section__btn data-section__btn--secondary" onClick={handleImport} disabled={busy}>
+          📥 从文件夹恢复数据
+        </button>
+      </div>
+      {status && <p className="data-section__status">{status}</p>}
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function ProfileContent() {
@@ -188,8 +243,8 @@ export function ProfileContent() {
       </div>
 
       <div className="profile-card">
-        <div className="profile-card__header">数据导出</div>
-        <p className="content__placeholder" style={{ padding: '12px 0' }}>Coming soon</p>
+        <div className="profile-card__header">数据管理</div>
+        <DataSection />
       </div>
     </div>
   )

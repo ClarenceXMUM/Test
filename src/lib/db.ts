@@ -1,253 +1,247 @@
 import { TrainingSession, TrainingDay, GoalEntry } from '../types/training'
 
-const DB_NAME = 'coros-analyzer'
-const VERSION = 4
+// ── Root: Origin Private File System (OPFS) ──────────────────────────────────
+// Always writable, no user permission needed, survives browser restarts.
+// Data lives in a "running-analytics/" sub-directory inside the browser's
+// private storage for this origin (not visible in Finder by default).
+// Use exportAllFiles() to copy everything to a user-visible folder.
 
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, VERSION)
-    req.onupgradeneeded = (e) => {
-      const db = req.result
-      const oldV = e.oldVersion
-      if (oldV < 1) db.createObjectStore('sessions', { keyPath: 'id' })
-      if (oldV < 2) db.createObjectStore('training_days', { keyPath: 'date' })
-      if (oldV < 3) {
-        // Add startTime index for dedup — only if sessions store already exists
-        const sessionsStore = (e.target as IDBOpenDBRequest).transaction!
-          .objectStore('sessions')
-        if (!sessionsStore.indexNames.contains('startTime')) {
-          sessionsStore.createIndex('startTime', 'startTime', { unique: true })
-        }
-      }
-      if (oldV < 4) {
-        db.createObjectStore('goals', { keyPath: 'id' })
-      }
-    }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror  = () => reject(req.error)
-  })
+let _root: FileSystemDirectoryHandle | null = null
+
+export async function getRoot(): Promise<FileSystemDirectoryHandle> {
+  if (_root) return _root
+  const opfs = await navigator.storage.getDirectory()
+  _root = await opfs.getDirectoryHandle('running-analytics', { create: true })
+  return _root
 }
 
-// ─── Sessions ─────────────────────────────────────────────────────────────────
+// ── File helpers ──────────────────────────────────────────────────────────────
+// Flat structure inside the OPFS sub-directory:
+//   _index.json          — startTime dedup map
+//   session_{id}.json    — TrainingSession
+//   day_{date}.json      — TrainingDay
+//   goals.json           — GoalEntry[]
+//   fit_{filename}       — raw FIT archive
 
-/** Returns null if session with same startTime already exists (dedup), else saves and returns the session */
+async function readJson<T>(root: FileSystemDirectoryHandle, filename: string): Promise<T | null> {
+  try {
+    const fh = await root.getFileHandle(filename)
+    const file = await fh.getFile()
+    return JSON.parse(await file.text()) as T
+  } catch {
+    return null
+  }
+}
+
+async function writeJson(root: FileSystemDirectoryHandle, filename: string, data: unknown): Promise<void> {
+  const fh = await root.getFileHandle(filename, { create: true })
+  const w = await fh.createWritable()
+  await w.write(JSON.stringify(data, null, 2))
+  await w.close()
+}
+
+async function removeFile(root: FileSystemDirectoryHandle, filename: string): Promise<void> {
+  try { await root.removeEntry(filename) } catch {}
+}
+
+// ── Sessions ──────────────────────────────────────────────────────────────────
+
 export async function saveSessionIfNew(session: TrainingSession): Promise<TrainingSession | null> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('sessions', 'readwrite')
-    const store = tx.objectStore('sessions')
+  const root = await getRoot()
 
-    // Check for duplicate by startTime index
-    const idxReq = store.index('startTime').getKey(session.startTime)
-    idxReq.onsuccess = () => {
-      if (idxReq.result !== undefined) {
-        // Already exists — skip silently
-        resolve(null)
-        return
-      }
-      const putReq = store.put(session)
-      putReq.onsuccess = () => resolve(session)
-      putReq.onerror   = () => reject(putReq.error)
-    }
-    idxReq.onerror = () => reject(idxReq.error)
-  })
+  // Dedup via _index.json (startTime → id map)
+  const index = (await readJson<Record<string, string>>(root, '_index.json')) ?? {}
+  if (index[session.startTime]) return null   // duplicate
+
+  index[session.startTime] = session.id
+  await writeJson(root, '_index.json', index)
+  await writeJson(root, `session_${session.id}.json`, session)
+  return session
 }
 
-/** Legacy save (used internally, no dedup check) */
 export async function saveSession(session: TrainingSession): Promise<void> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('sessions', 'readwrite')
-    tx.objectStore('sessions').put(session)
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
-  })
+  const root = await getRoot()
+  await writeJson(root, `session_${session.id}.json`, session)
 }
 
 export async function getSession(id: string): Promise<TrainingSession | null> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const req = db.transaction('sessions', 'readonly').objectStore('sessions').get(id)
-    req.onsuccess = () => resolve(req.result ?? null)
-    req.onerror   = () => reject(req.error)
-  })
+  const root = await getRoot()
+  return readJson<TrainingSession>(root, `session_${id}.json`)
 }
 
 export async function getAllSessions(): Promise<TrainingSession[]> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const req = db.transaction('sessions', 'readonly').objectStore('sessions').getAll()
-    req.onsuccess = () => resolve(req.result)
-    req.onerror   = () => reject(req.error)
-  })
+  const root = await getRoot()
+  const results: TrainingSession[] = []
+  for await (const [name] of root.entries()) {
+    if (!name.startsWith('session_') || !name.endsWith('.json')) continue
+    const s = await readJson<TrainingSession>(root, name)
+    if (s) results.push(s)
+  }
+  return results
 }
 
 export async function getSessionsByIds(ids: string[]): Promise<TrainingSession[]> {
-  const db = await openDB()
-  const tx = db.transaction('sessions', 'readonly')
-  const store = tx.objectStore('sessions')
-  const results = await Promise.all(
-    ids.map(id => new Promise<TrainingSession | null>((res, rej) => {
-      const req = store.get(id)
-      req.onsuccess = () => res(req.result ?? null)
-      req.onerror   = () => rej(req.error)
-    }))
-  )
-  return results.filter(Boolean) as TrainingSession[]
+  const root = await getRoot()
+  const results: TrainingSession[] = []
+  for (const id of ids) {
+    const s = await readJson<TrainingSession>(root, `session_${id}.json`)
+    if (s) results.push(s)
+  }
+  return results.filter(Boolean)
 }
 
-// ─── Training days ────────────────────────────────────────────────────────────
-
-function toDateKey(iso: string): string {
-  return iso.slice(0, 10)
-}
+// ── Training Days ─────────────────────────────────────────────────────────────
 
 export async function getAllDays(): Promise<TrainingDay[]> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const req = db.transaction('training_days', 'readonly').objectStore('training_days').getAll()
-    req.onsuccess = () => {
-      const days: TrainingDay[] = req.result
-      days.sort((a, b) => b.date.localeCompare(a.date))
-      resolve(days)
-    }
-    req.onerror = () => reject(req.error)
-  })
+  const root = await getRoot()
+  const results: TrainingDay[] = []
+  for await (const [name] of root.entries()) {
+    if (!name.startsWith('day_') || !name.endsWith('.json')) continue
+    const d = await readJson<TrainingDay>(root, name)
+    if (d) results.push(d)
+  }
+  results.sort((a, b) => b.date.localeCompare(a.date))
+  return results
 }
 
 export async function getDayByDate(date: string): Promise<TrainingDay | null> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const req = db.transaction('training_days', 'readonly')
-      .objectStore('training_days').get(date)
-    req.onsuccess = () => resolve(req.result ?? null)
-    req.onerror   = () => reject(req.error)
-  })
+  const root = await getRoot()
+  return readJson<TrainingDay>(root, `day_${date}.json`)
 }
 
-/** Update arbitrary fields on a training_day record (non-destructive merge). */
 export async function updateDay(date: string, updates: Partial<Omit<TrainingDay, 'date'>>): Promise<void> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('training_days', 'readwrite')
-    const store = tx.objectStore('training_days')
-    const getReq = store.get(date)
-    getReq.onsuccess = () => {
-      const existing: TrainingDay | undefined = getReq.result
-      if (!existing) { resolve(); return }
-      const putReq = store.put({ ...existing, ...updates })
-      putReq.onsuccess = () => resolve()
-      putReq.onerror   = () => reject(putReq.error)
-    }
-    getReq.onerror = () => reject(getReq.error)
-  })
+  const root = await getRoot()
+  const existing = await readJson<TrainingDay>(root, `day_${date}.json`)
+  if (!existing) return
+  await writeJson(root, `day_${date}.json`, { ...existing, ...updates })
 }
 
-/** Merge session into its training_day. Assumes session was already deduped. */
 export async function saveOrMergeDay(session: TrainingSession): Promise<void> {
-  const db = await openDB()
-  const dateKey = toDateKey(session.startTime)
-  const store = db.transaction('training_days', 'readwrite').objectStore('training_days')
-
-  return new Promise((resolve, reject) => {
-    const getReq = store.get(dateKey)
-    getReq.onsuccess = () => {
-      const existing: TrainingDay | undefined = getReq.result
-      let day: TrainingDay
-
-      if (existing) {
-        if (existing.sessionIds.includes(session.id)) { resolve(); return }
-        day = {
-          date: dateKey,
-          sessionIds: [...existing.sessionIds, session.id],
-          totalDistanceKm: existing.totalDistanceKm + session.distanceKm,
-          totalDurationSec: existing.totalDurationSec + session.durationSec,
-        }
-      } else {
-        day = {
-          date: dateKey,
-          sessionIds: [session.id],
-          totalDistanceKm: session.distanceKm,
-          totalDurationSec: session.durationSec,
-        }
-      }
-
-      const putReq = store.put(day)
-      putReq.onsuccess = () => resolve()
-      putReq.onerror   = () => reject(putReq.error)
+  const date = session.startTime.slice(0, 10)
+  const root = await getRoot()
+  const existing = await readJson<TrainingDay>(root, `day_${date}.json`)
+  let day: TrainingDay
+  if (existing) {
+    if (existing.sessionIds.includes(session.id)) return
+    day = {
+      date,
+      sessionIds: [...existing.sessionIds, session.id],
+      totalDistanceKm: existing.totalDistanceKm + session.distanceKm,
+      totalDurationSec: existing.totalDurationSec + session.durationSec,
     }
-    getReq.onerror = () => reject(getReq.error)
-  })
+  } else {
+    day = {
+      date,
+      sessionIds: [session.id],
+      totalDistanceKm: session.distanceKm,
+      totalDurationSec: session.durationSec,
+    }
+  }
+  await writeJson(root, `day_${date}.json`, day)
 }
 
-/** Remove a session from a training_day's sessionIds (and adjust totals). Does NOT delete the session record itself. */
 export async function deleteSessionFromDay(sessionId: string, date: string): Promise<void> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(['sessions', 'training_days'], 'readwrite')
-    const sessStore = tx.objectStore('sessions')
-    const dayStore  = tx.objectStore('training_days')
+  const root = await getRoot()
+  const session = await readJson<TrainingSession>(root, `session_${sessionId}.json`)
+  const day = await readJson<TrainingDay>(root, `day_${date}.json`)
+  if (!day) return
 
-    const getSess = sessStore.get(sessionId)
-    getSess.onsuccess = () => {
-      const session: TrainingSession | undefined = getSess.result
-      const getDay = dayStore.get(date)
-      getDay.onsuccess = () => {
-        const day: TrainingDay | undefined = getDay.result
-        if (!day) { resolve(); return }
+  const newIds = day.sessionIds.filter(id => id !== sessionId)
+  if (newIds.length === 0) {
+    await removeFile(root, `day_${date}.json`)
+  } else {
+    await writeJson(root, `day_${date}.json`, {
+      ...day,
+      sessionIds: newIds,
+      totalDistanceKm: Math.max(0, day.totalDistanceKm - (session?.distanceKm ?? 0)),
+      totalDurationSec: Math.max(0, day.totalDurationSec - (session?.durationSec ?? 0)),
+    })
+  }
 
-        const newIds = day.sessionIds.filter(id => id !== sessionId)
-        const distDelta  = session?.distanceKm  ?? 0
-        const durDelta   = session?.durationSec ?? 0
+  await removeFile(root, `session_${sessionId}.json`)
 
-        if (newIds.length === 0) {
-          dayStore.delete(date)
-        } else {
-          dayStore.put({
-            ...day,
-            sessionIds: newIds,
-            totalDistanceKm:  Math.max(0, day.totalDistanceKm  - distDelta),
-            totalDurationSec: Math.max(0, day.totalDurationSec - durDelta),
-          })
-        }
-
-        if (session) sessStore.delete(sessionId)
-      }
-      getDay.onerror = () => reject(getDay.error)
-    }
-    getSess.onerror = () => reject(getSess.error)
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
-  })
+  // Update index
+  if (session) {
+    const index = (await readJson<Record<string, string>>(root, '_index.json')) ?? {}
+    delete index[session.startTime]
+    await writeJson(root, '_index.json', index)
+  }
 }
 
-// ─── Goals ────────────────────────────────────────────────────────────────────
+// ── Goals ─────────────────────────────────────────────────────────────────────
 
-export async function getAllGoals(): Promise<GoalEntry[]> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const req = db.transaction('goals', 'readonly').objectStore('goals').getAll()
-    req.onsuccess = () => resolve(req.result)
-    req.onerror   = () => reject(req.error)
-  })
+async function readGoals(): Promise<GoalEntry[]> {
+  const root = await getRoot()
+  return (await readJson<GoalEntry[]>(root, 'goals.json')) ?? []
 }
+
+async function writeGoals(goals: GoalEntry[]): Promise<void> {
+  const root = await getRoot()
+  await writeJson(root, 'goals.json', goals)
+}
+
+export async function getAllGoals(): Promise<GoalEntry[]> { return readGoals() }
 
 export async function saveGoal(goal: GoalEntry): Promise<void> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('goals', 'readwrite')
-    tx.objectStore('goals').put(goal)
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
-  })
+  const goals = await readGoals()
+  const idx = goals.findIndex(g => g.id === goal.id)
+  if (idx >= 0) goals[idx] = goal
+  else goals.push(goal)
+  await writeGoals(goals)
 }
 
 export async function deleteGoal(id: string): Promise<void> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('goals', 'readwrite')
-    tx.objectStore('goals').delete(id)
-    tx.oncomplete = () => resolve()
-    tx.onerror    = () => reject(tx.error)
-  })
+  const goals = await readGoals()
+  await writeGoals(goals.filter(g => g.id !== id))
+}
+
+// ── FIT file archive ──────────────────────────────────────────────────────────
+
+export async function saveFitFile(filename: string, buffer: ArrayBuffer): Promise<void> {
+  try {
+    const root = await getRoot()
+    const fh = await root.getFileHandle(`fit_${filename}`, { create: true })
+    const w = await fh.createWritable()
+    await w.write(buffer)
+    await w.close()
+  } catch {
+    // non-critical
+  }
+}
+
+// ── Export / Backup ───────────────────────────────────────────────────────────
+
+/** Copy all OPFS files to a user-chosen visible folder. Returns file count. */
+export async function exportAllFiles(dest: FileSystemDirectoryHandle): Promise<number> {
+  const root = await getRoot()
+  let count = 0
+  for await (const [name, handle] of root.entries()) {
+    if (handle.kind !== 'file') continue
+    const srcFile = await (handle as FileSystemFileHandle).getFile()
+    const buf = await srcFile.arrayBuffer()
+    const destFh = await dest.getFileHandle(name, { create: true })
+    const w = await destFh.createWritable()
+    await w.write(buf)
+    await w.close()
+    count++
+  }
+  return count
+}
+
+/** Import all JSON/FIT files from a user-chosen folder into OPFS (merge, no dedup reset). */
+export async function importFromFolder(src: FileSystemDirectoryHandle): Promise<number> {
+  const root = await getRoot()
+  let count = 0
+  for await (const [name, handle] of src.entries()) {
+    if (handle.kind !== 'file') continue
+    if (!name.endsWith('.json') && !name.endsWith('.fit')) continue
+    const file = await (handle as FileSystemFileHandle).getFile()
+    const buf = await file.arrayBuffer()
+    const destFh = await root.getFileHandle(name, { create: true })
+    const w = await destFh.createWritable()
+    await w.write(buf)
+    await w.close()
+    count++
+  }
+  return count
 }

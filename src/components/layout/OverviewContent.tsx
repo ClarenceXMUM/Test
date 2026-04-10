@@ -124,7 +124,8 @@ export function OverviewContent() {
     setImporting(true)
     setImportStatus(`正在解析 0 / ${files.length}…`)
 
-    let done = 0, saved = 0, skipped = 0
+    let done = 0, saved = 0, skipped = 0, failed = 0
+    let lastError = ''
     for (const file of files) {
       try {
         const buffer = await file.arrayBuffer()
@@ -132,18 +133,21 @@ export function OverviewContent() {
         const result = await saveSessionIfNew(session)
         if (result) { await saveOrMergeDay(session); saved++ }
         else skipped++
-      } catch { skipped++ }
+      } catch (e) {
+        console.error('import error:', file.name, e)
+        failed++
+        lastError = (e as Error).message || String(e)
+      }
       done++
       setImportStatus(`正在解析 ${done} / ${files.length}…`)
     }
 
     setImporting(false)
-    setImportStatus(
-      skipped > 0
-        ? `完成：新增 ${saved} 个，跳过重复 ${skipped} 个`
-        : `完成：新增 ${saved} 个训练`
-    )
-    setTimeout(() => setImportStatus(null), 3000)
+    const parts: string[] = [`新增 ${saved}`]
+    if (skipped) parts.push(`跳过重复 ${skipped}`)
+    if (failed) parts.push(`失败 ${failed}（${lastError}）`)
+    setImportStatus(`完成：${parts.join('，')}`)
+    setTimeout(() => setImportStatus(null), failed ? 8000 : 3000)
     loadDays()
   }
 
