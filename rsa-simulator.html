@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RSA 加密模拟器</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+  * { font-family: 'JetBrains Mono', monospace; }
+
+  .card {
+    border: 3px solid #000;
+    box-shadow: 4px 4px 0px #000;
+    background: #fff;
+    transition: border-color 0.25s, box-shadow 0.25s;
+  }
+  .card.valid {
+    border-color: #16a34a;
+    box-shadow: 4px 4px 0px #16a34a;
+  }
+  .card.invalid {
+    border-color: #dc2626;
+    box-shadow: 4px 4px 0px #dc2626;
+  }
+
+  .btn {
+    border: 3px solid #000;
+    box-shadow: 4px 4px 0px #000;
+    background: #fff;
+    transition: all 0.1s ease;
+    cursor: pointer;
+    user-select: none;
+  }
+  .btn:hover {
+    box-shadow: 2px 2px 0px #000;
+    transform: translate(2px, 2px);
+  }
+  .btn:active {
+    box-shadow: 0px 0px 0px #000;
+    transform: translate(4px, 4px);
+  }
+  .btn.active-mode {
+    background: #000;
+    color: #fff;
+  }
+  .btn.disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Key config input fields */
+  .key-input {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid #000;
+    outline: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.05rem;
+    font-weight: 700;
+    width: 100%;
+    padding: 1px 2px;
+    color: #000;
+    -moz-appearance: textfield;
+  }
+  .key-input::-webkit-outer-spin-button,
+  .key-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+  .key-input:focus { border-bottom-color: #000; }
+  .key-input::placeholder { color: #bbb; font-weight: 400; }
+  .key-computed {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #000;
+    line-height: 1.4;
+  }
+  .key-computed.pending { color: #aaa; }
+
+  .scroll-container {
+    overflow-y: auto;
+    position: relative;
+    scroll-behavior: smooth;
+  }
+
+  .step-line {
+    transition: all 0.4s ease;
+    opacity: 0.25;
+    transform: scale(0.95);
+  }
+  .step-line.visible { opacity: 1; transform: scale(1); }
+  .step-line.current {
+    opacity: 1; transform: scale(1);
+    background: #f5f5f5; border-left: 3px solid #000;
+  }
+
+  .number-animate { display: inline-block; transition: all 0.3s ease; }
+  .number-animate.pop { transform: scale(1.3); color: #000; font-weight: 700; }
+
+  .history-item {
+    border: 2px solid #000;
+    transition: all 0.15s ease;
+    cursor: pointer;
+  }
+  .history-item:hover { box-shadow: 2px 2px 0px #000; transform: translate(-1px,-1px); }
+
+  .sidebar {
+    transition: width 0.3s ease, opacity 0.3s ease, padding 0.3s ease;
+    overflow: hidden;
+  }
+  .sidebar.collapsed {
+    width: 0 !important; padding: 0 !important;
+    opacity: 0; border: none !important;
+  }
+
+  .input-char {
+    border: 3px solid #000; box-shadow: 4px 4px 0px #000;
+    text-align: center; font-size: 2rem; font-weight: 700;
+    width: 4rem; height: 4rem; outline: none;
+    text-transform: uppercase; caret-color: #000;
+  }
+  .input-char:focus { box-shadow: 2px 2px 0px #000; transform: translate(2px, 2px); }
+
+  .arrow { font-size: 1.2rem; line-height: 1; color: #999; }
+  .arrow.visible { color: #000; }
+
+  .status-badge {
+    border: 2px solid #000; padding: 2px 10px;
+    font-size: 0.75rem; font-weight: 600;
+  }
+
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .blink { animation: blink 1s ease-in-out infinite; }
+
+  .fade-in { animation: fadeIn 0.4s ease forwards; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Toast — shared element, class switches style */
+  .toast {
+    position: fixed; top: -80px; left: 50%;
+    transform: translateX(-50%); z-index: 9999;
+    border: 3px solid #dc2626; background: #fef2f2; color: #dc2626;
+    font-weight: 700; padding: 12px 28px; font-size: 0.9rem;
+    box-shadow: 4px 4px 0px #dc2626;
+    transition: top 0.35s cubic-bezier(0.4,0,0.2,1);
+    white-space: nowrap;
+  }
+  .toast.show { top: 24px; }
+  .toast.info {
+    border-color: #000; background: #f5f5f5; color: #000;
+    box-shadow: 4px 4px 0px #000;
+  }
+
+  /* Tutorial overlay */
+  .tutorial-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+    z-index: 900; display: none; justify-content: center;
+    align-items: start; padding: 40px 16px; overflow-y: auto;
+  }
+  .tutorial-overlay.open { display: flex; }
+  .tutorial-panel {
+    background: #fff; border: 3px solid #000;
+    box-shadow: 6px 6px 0px #000; max-width: 720px;
+    width: 100%; padding: 32px; position: relative;
+  }
+  .tutorial-close {
+    position: absolute; top: 12px; right: 16px;
+    background: none; border: 2px solid #000;
+    width: 28px; height: 28px; font-size: 14px; font-weight: bold;
+    cursor: pointer; display: flex; align-items: center;
+    justify-content: center; transition: all 0.1s;
+  }
+  .tutorial-close:hover { background: #000; color: #fff; }
+
+  /* Prose styling */
+  .prose h1 {
+    font-size: 1.35rem; font-weight: 700;
+    border-bottom: 3px solid #000; padding-bottom: 8px; margin-bottom: 20px;
+  }
+  .prose h2 {
+    font-size: 1.05rem; font-weight: 700;
+    margin-top: 28px; margin-bottom: 12px;
+    padding: 6px 10px; background: #f5f5f5; border-left: 4px solid #000;
+  }
+  .prose p { font-size: 0.82rem; line-height: 1.75; margin-bottom: 10px; color: #333; }
+  .prose ul { list-style: none; padding: 0; margin-bottom: 12px; }
+  .prose ul li {
+    font-size: 0.82rem; line-height: 1.75;
+    padding: 4px 0 4px 20px; position: relative; color: #333;
+  }
+  .prose ul li::before { content:'>'; position:absolute; left:4px; color:#999; font-weight:bold; }
+  .prose code {
+    background: #f5f5f5; border: 1px solid #ddd;
+    padding: 1px 5px; font-size: 0.8rem; font-weight: 600;
+  }
+  .prose .formula-block {
+    background: #fafafa; border: 2px solid #000;
+    padding: 12px 16px; margin: 12px 0;
+    font-size: 0.85rem; line-height: 1.8;
+  }
+  .prose .formula-block .formula-line { display: block; padding: 2px 0; }
+  .prose .step-box {
+    border: 2px solid #e5e5e5; padding: 10px 14px;
+    margin: 6px 0; font-size: 0.82rem; background: #fff;
+  }
+  .prose .step-box strong { display: block; margin-bottom: 2px; }
+  .prose .note { font-size: 0.78rem; color: #888; font-style: italic; margin-top: 4px; }
+  .prose .highlight {
+    background: #fffde7; border-left: 3px solid #f59e0b;
+    padding: 10px 14px; margin: 14px 0; font-size: 0.82rem;
+  }
+</style>
+</head>
+<body class="bg-white min-h-screen text-black">
+
+<!-- Shared Toast -->
+<div id="toast" class="toast"></div>
+
+<div class="max-w-5xl mx-auto p-4 md:p-8">
+
+  <!-- Header -->
+  <div class="card p-4 mb-6 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl md:text-2xl font-bold tracking-tight">RSA 加密模拟器</h1>
+      <p class="text-xs text-gray-500 mt-1" id="headerSub">教学演示 · p=7, q=13, n=91</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <button class="btn px-3 py-1 text-xs" onclick="toggleTutorial()">📖 原理学习</button>
+      <button class="btn px-3 py-1 text-xs" onclick="toggleKeyInfo()">⚙️ 密钥配置</button>
+      <button class="btn px-3 py-1 text-xs" id="historyToggle" onclick="toggleSidebar()">📋 历史记录</button>
+    </div>
+  </div>
+
+  <!-- Key Config Panel -->
+  <div id="keyInfoPanel" class="card p-4 mb-6 hidden">
+    <div class="flex items-center justify-between mb-4">
+      <span class="font-bold text-sm">⚙️ 密钥配置</span>
+      <button class="text-xs text-gray-500 hover:text-black" onclick="toggleKeyInfo()">✕ 关闭</button>
+    </div>
+
+    <!-- Parameter grid -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4">
+      <!-- p -->
+      <div class="border-2 border-black p-2">
+        <div class="text-xs text-gray-500 mb-1">素数 p</div>
+        <input id="inputP" type="number" min="2" class="key-input" value="7" oninput="onKeyInputChange()">
+      </div>
+      <!-- q -->
+      <div class="border-2 border-black p-2">
+        <div class="text-xs text-gray-500 mb-1">素数 q</div>
+        <input id="inputQ" type="number" min="2" class="key-input" value="13" oninput="onKeyInputChange()">
+      </div>
+      <!-- n -->
+      <div class="border-2 border-black p-2 bg-gray-50">
+        <div class="text-xs text-gray-500">n = p × q</div>
+        <div class="key-computed" id="displayN">91</div>
+      </div>
+      <!-- phi -->
+      <div class="border-2 border-black p-2 bg-gray-50">
+        <div class="text-xs text-gray-500">φ(n) = (p-1)(q-1)</div>
+        <div class="key-computed" id="displayPhi">72</div>
+      </div>
+      <!-- e -->
+      <div class="border-2 border-black p-2">
+        <div class="text-xs text-gray-500 mb-1">公钥 e <span class="text-gray-400 text-xs">(留空自动)</span></div>
+        <input id="inputE" type="number" min="2" class="key-input" placeholder="自动" oninput="onKeyInputChange()">
+      </div>
+      <!-- d -->
+      <div class="border-2 border-black p-2 bg-gray-50">
+        <div class="text-xs text-gray-500">私钥 d <span class="text-gray-400 text-xs">(自动计算)</span></div>
+        <div class="key-computed" id="displayD">29</div>
+      </div>
+      <!-- verify -->
+      <div class="border-2 border-black p-2 col-span-2 bg-gray-50">
+        <div class="text-xs text-gray-500">验证: e × d mod φ(n) = 1</div>
+        <div class="key-computed text-sm" id="displayVerify">5 × 29 mod 72 = 1 ✓</div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="flex items-center gap-3 flex-wrap">
+      <button class="btn px-4 py-2 text-sm font-bold" onclick="applyKeyConfig()">✓ 应用参数</button>
+      <button class="btn px-4 py-2 text-sm" onclick="resetKeyConfig()">↺ 恢复默认</button>
+      <span id="keyStatus" class="text-xs font-bold text-green-600">✓ 密钥有效</span>
+    </div>
+    <!-- Error msg -->
+    <div id="keyError" class="mt-2 text-xs font-bold text-red-600 hidden"></div>
+  </div>
+
+  <!-- Main content area -->
+  <div class="flex gap-6">
+    <div class="flex-1 min-w-0">
+
+      <!-- Input area -->
+      <div class="card p-5 mb-6">
+        <div class="flex flex-col items-center gap-4">
+          <label class="text-xs text-gray-500 tracking-wider uppercase">输入一个字母</label>
+          <input id="charInput" type="text" maxlength="1" class="input-char"
+            placeholder="_" autocomplete="off" oninput="onInputChange(this)"/>
+          <div id="asciiPreview" class="text-sm text-gray-400 h-5"></div>
+        </div>
+      </div>
+
+      <!-- Mode buttons -->
+      <div class="grid grid-cols-2 gap-4 mb-6">
+        <button id="btnEncrypt" class="btn p-4 text-center" onclick="doEncrypt()">
+          <div class="text-lg font-bold">加密 🔒</div>
+          <div class="text-xs text-gray-500 mt-1">C = M<sup>e</sup> mod n</div>
+        </button>
+        <button id="btnDecrypt" class="btn p-4 text-center disabled" onclick="doDecrypt()">
+          <div class="text-lg font-bold">解密 🔓</div>
+          <div class="text-xs text-gray-500 mt-1" id="decryptHint">需要先加密</div>
+        </button>
+      </div>
+
+      <!-- Visualization -->
+      <div class="card mb-6">
+        <div class="flex items-center justify-between p-3 border-b-2 border-black">
+          <span class="text-xs font-bold tracking-wider uppercase">运算过程</span>
+          <span id="statusBadge" class="status-badge bg-white text-gray-400">等待输入</span>
+        </div>
+        <div class="scroll-container" style="height:320px" id="scrollContainer">
+          <div id="stepsContainer" class="space-y-1 p-4">
+            <div class="text-center text-gray-300 py-20">
+              <div class="text-3xl mb-3">↑</div>
+              <div class="text-sm">输入字母并选择加密或解密</div>
+              <div class="text-sm">运算过程将在此展示</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div id="sidebar" class="sidebar card p-4" style="width:240px;flex-shrink:0">
+      <div class="flex items-center justify-between mb-3">
+        <span class="font-bold text-xs tracking-wider uppercase">历史记录</span>
+        <button class="text-xs text-gray-400 hover:text-black" onclick="clearHistory()">清空</button>
+      </div>
+      <div id="historyList" class="space-y-2 overflow-y-auto" style="max-height:500px">
+        <div class="text-xs text-gray-300 text-center py-8">暂无记录</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tutorial Overlay -->
+<div id="tutorialOverlay" class="tutorial-overlay" onclick="if(event.target===this)toggleTutorial()">
+  <div class="tutorial-panel">
+    <button class="tutorial-close" onclick="toggleTutorial()">✕</button>
+    <div class="prose" id="tutorialContent"><!-- rendered by JS --></div>
+  </div>
+</div>
+
+<script>
+// ─── RSA Parameters (mutable) ───────────────────────────────────────────────
+let RSA = { p: 7, q: 13, n: 91, e: 5, d: 29, phi: 72 };
+const RSA_DEFAULT = { p: 7, q: 13, n: 91, e: 5, d: 29, phi: 72 };
+
+// ─── App State ───────────────────────────────────────────────────────────────
+let isRunning = false;
+let currentStepIndex = -1;
+let encryptResult = null;
+let history = JSON.parse(localStorage.getItem('rsa_history') || '[]');
+
+// ─── Math Helpers ────────────────────────────────────────────────────────────
+function isPrime(n) {
+  n = parseInt(n);
+  if (n < 2) return false;
+  if (n === 2) return true;
+  if (n % 2 === 0) return false;
+  for (let i = 3; i <= Math.sqrt(n); i += 2) {
+    if (n % i === 0) return false;
+  }
+  return true;
+}
+
+function gcd(a, b) {
+  a = Math.abs(a); b = Math.abs(b);
+  while (b) { [a, b] = [b, a % b]; }
+  return a;
+}
+
+function modInverse(e, phi) {
+  // Extended Euclidean algorithm — returns d such that e*d ≡ 1 (mod phi)
+  let [old_r, r] = [e, phi];
+  let [old_s, s] = [1, 0];
+  while (r !== 0) {
+    const q = Math.floor(old_r / r);
+    [old_r, r] = [r, old_r - q * r];
+    [old_s, s] = [s, old_s - q * s];
+  }
+  return ((old_s % phi) + phi) % phi;
+}
+
+function findE(phi) {
+  // Auto-select smallest e > 2 coprime with phi
+  for (let e = 3; e < phi; e += 2) {
+    if (gcd(e, phi) === 1) return e;
+  }
+  return -1;
+}
+
+function modPow(base, exp, mod) {
+  let result = 1n;
+  base = BigInt(base) % BigInt(mod);
+  exp = BigInt(exp);
+  mod = BigInt(mod);
+  while (exp > 0n) {
+    if (exp % 2n === 1n) result = (result * base) % mod;
+    exp = exp / 2n;
+    base = (base * base) % mod;
+  }
+  return Number(result);
+}
+
+function bigPow(base, exp) {
+  return (BigInt(base) ** BigInt(exp)).toString();
+}
+
+function formatTime(date) {
+  const d = new Date(date);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// ─── Toast ───────────────────────────────────────────────────────────────────
+let _toastTimer = null;
+function _showToast(msg, isInfo = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('info', isInfo);
+  t.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+function showToast(msg)     { _showToast(msg, false); }
+function showInfoToast(msg) { _showToast(msg, true);  }
+
+// ─── Key Config Panel ────────────────────────────────────────────────────────
+function onKeyInputChange() {
+  const p = parseInt(document.getElementById('inputP').value) || 0;
+  const q = parseInt(document.getElementById('inputQ').value) || 0;
+  const n   = (p > 0 && q > 0) ? p * q : null;
+  const phi = (p > 1 && q > 1) ? (p-1)*(q-1) : null;
+
+  document.getElementById('displayN').textContent   = n   !== null ? n   : '—';
+  document.getElementById('displayPhi').textContent = phi !== null ? phi : '—';
+  document.getElementById('displayD').textContent   = '—';
+  document.getElementById('displayVerify').textContent = '—';
+
+  // Reset panel state to neutral
+  const panel = document.getElementById('keyInfoPanel');
+  panel.classList.remove('valid', 'invalid');
+  document.getElementById('keyStatus').textContent  = '待验证';
+  document.getElementById('keyStatus').className    = 'text-xs font-bold text-gray-400';
+  document.getElementById('keyError').classList.add('hidden');
+}
+
+function _setKeyError(msg) {
+  const panel = document.getElementById('keyInfoPanel');
+  panel.classList.remove('valid'); panel.classList.add('invalid');
+  const st = document.getElementById('keyStatus');
+  st.textContent = '✗ 参数无效'; st.className = 'text-xs font-bold text-red-600';
+  const err = document.getElementById('keyError');
+  err.textContent = '⚠ ' + msg; err.classList.remove('hidden');
+}
+
+function _setKeyValid() {
+  const panel = document.getElementById('keyInfoPanel');
+  panel.classList.remove('invalid'); panel.classList.add('valid');
+  const st = document.getElementById('keyStatus');
+  st.textContent = '✓ 密钥有效'; st.className = 'text-xs font-bold text-green-600';
+  document.getElementById('keyError').classList.add('hidden');
+}
+
+function applyKeyConfig() {
+  const p = parseInt(document.getElementById('inputP').value);
+  const q = parseInt(document.getElementById('inputQ').value);
+  const eRaw = document.getElementById('inputE').value.trim();
+
+  // 1. Prime check
+  if (!isPrime(p)) { _setKeyError(`p = ${p} 不是质数`); return; }
+  if (!isPrime(q)) { _setKeyError(`q = ${q} 不是质数`); return; }
+  if (p === q)     { _setKeyError(`p 和 q 不能相同（需要两个不同的质数）`); return; }
+
+  // 2. Range check
+  const n = p * q;
+  if (n <= 90) { _setKeyError(`n = p×q = ${n}，必须 > 90 才能加密字母 A-Z`); return; }
+
+  // 3. Phi & e
+  const phi = (p-1) * (q-1);
+  let e;
+  if (eRaw === '') {
+    e = findE(phi);
+    document.getElementById('inputE').value = e;
+  } else {
+    e = parseInt(eRaw);
+    if (e < 2) { _setKeyError(`e 必须 ≥ 2`); return; }
+    if (gcd(e, phi) !== 1) {
+      _setKeyError(`e = ${e} 与 φ(n) = ${phi} 不互质（gcd = ${gcd(e, phi)}），无法生成私钥`);
+      return;
+    }
+  }
+
+  // 4. Compute d
+  const d = modInverse(e, phi);
+  if (d < 2) { _setKeyError(`无法计算有效的私钥 d，请尝试不同的 e`); return; }
+
+  // Apply
+  RSA = { p, q, n, e, d, phi };
+
+  // Update display fields
+  document.getElementById('displayN').textContent       = n;
+  document.getElementById('displayPhi').textContent     = phi;
+  document.getElementById('displayD').textContent       = d;
+  document.getElementById('displayVerify').textContent  = `${e} × ${d} mod ${phi} = ${(e * d) % phi} ✓`;
+
+  _setKeyValid();
+  updateHeaderSub();
+
+  // Reset history if any
+  if (history.length > 0) {
+    clearHistory();
+    showInfoToast('密钥已更改，历史记录已重置');
+  } else {
+    showInfoToast(`密钥已更新：n=${n}, e=${e}, d=${d}`);
+  }
+
+  // Reset encrypt state
+  encryptResult = null;
+  updateDecryptBtn();
+
+  // Re-render tutorial with new params
+  renderTutorial();
+}
+
+function resetKeyConfig() {
+  RSA = { ...RSA_DEFAULT };
+  document.getElementById('inputP').value = RSA.p;
+  document.getElementById('inputQ').value = RSA.q;
+  document.getElementById('inputE').value = RSA.e;
+  document.getElementById('displayN').textContent      = RSA.n;
+  document.getElementById('displayPhi').textContent    = RSA.phi;
+  document.getElementById('displayD').textContent      = RSA.d;
+  document.getElementById('displayVerify').textContent = `${RSA.e} × ${RSA.d} mod ${RSA.phi} = 1 ✓`;
+  _setKeyValid();
+  updateHeaderSub();
+  if (history.length > 0) {
+    clearHistory();
+    showInfoToast('已恢复默认密钥，历史记录已清空');
+  } else {
+    showInfoToast('已恢复默认密钥');
+  }
+  encryptResult = null;
+  updateDecryptBtn();
+  renderTutorial();
+}
+
+function updateHeaderSub() {
+  document.getElementById('headerSub').textContent =
+    `教学演示 · p=${RSA.p}, q=${RSA.q}, n=${RSA.n}`;
+}
+
+// ─── Input ───────────────────────────────────────────────────────────────────
+function onInputChange(input) {
+  let v = input.value.replace(/[^a-zA-Z]/g, '');
+  if (v.length > 1) v = v.charAt(v.length - 1);
+  input.value = v.toUpperCase();
+  const preview = document.getElementById('asciiPreview');
+  if (v) {
+    const code = v.toUpperCase().charCodeAt(0);
+    preview.textContent = `ASCII: ${code}`;
+  } else {
+    preview.textContent = '';
+  }
+}
+
+// ─── Panel Toggles ───────────────────────────────────────────────────────────
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  sb.classList.toggle('collapsed');
+  document.getElementById('historyToggle').textContent =
+    sb.classList.contains('collapsed') ? '📋 展开' : '📋 历史记录';
+}
+
+function toggleKeyInfo() {
+  document.getElementById('keyInfoPanel').classList.toggle('hidden');
+}
+
+function toggleTutorial() {
+  document.getElementById('tutorialOverlay').classList.toggle('open');
+}
+
+// ─── Decrypt Button ──────────────────────────────────────────────────────────
+function updateDecryptBtn() {
+  const btn  = document.getElementById('btnDecrypt');
+  const hint = document.getElementById('decryptHint');
+  if (encryptResult) {
+    btn.classList.remove('disabled');
+    hint.textContent = `密文 C = ${encryptResult.C}`;
+  } else {
+    btn.classList.add('disabled');
+    hint.textContent = '需要先加密';
+  }
+}
+
+// ─── History ─────────────────────────────────────────────────────────────────
+function saveHistory(entry) {
+  history.unshift(entry);
+  if (history.length > 20) history.pop();
+  localStorage.setItem('rsa_history', JSON.stringify(history));
+  renderHistory();
+}
+
+function clearHistory() {
+  history = [];
+  localStorage.setItem('rsa_history', JSON.stringify(history));
+  renderHistory();
+}
+
+function renderHistory() {
+  const list = document.getElementById('historyList');
+  if (history.length === 0) {
+    list.innerHTML = '<div class="text-xs text-gray-300 text-center py-8">暂无记录</div>';
+    return;
+  }
+  list.innerHTML = history.map((h, i) => `
+    <div class="history-item p-2 bg-white" onclick="replayHistory(${i})">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold">🔒🔓 ${h.char}</span>
+        <span class="text-xs text-gray-400">${formatTime(h.time)}</span>
+      </div>
+      <div class="text-xs text-gray-500 mt-1 tracking-wide">
+        ${h.char}(${h.M}) → 🔒 ${h.C} → 🔓 ${h.M2}(${h.char2})
+      </div>
+    </div>
+  `).join('');
+}
+
+function replayHistory(index) {
+  if (isRunning) return;
+  const h = history[index];
+  document.getElementById('charInput').value = h.char;
+  onInputChange(document.getElementById('charInput'));
+  replayFullProcess(h);
+}
+
+// ─── Step Generation ─────────────────────────────────────────────────────────
+function generateEncryptSteps(char) {
+  const M = char.charCodeAt(0);
+  const powStr = bigPow(M, RSA.e);
+  const C = modPow(M, RSA.e, RSA.n);
+  return [
+    { type:'header', text:'── 加密过程 ──' },
+    { type:'label',  text:'① 输入转换' },
+    { type:'calc',   text:`字母 "${char}" → ASCII 码` },
+    { type:'result', text:`M = ${M}`, value:M },
+    { type:'arrow' },
+    { type:'label',  text:'② 公钥参数' },
+    { type:'calc',   text:`公钥 (e, n) = (${RSA.e}, ${RSA.n})` },
+    { type:'calc',   text:`加密公式: C = M ^ e mod n` },
+    { type:'arrow' },
+    { type:'label',  text:'③ 幂运算' },
+    { type:'calc',   text:`M ^ e = ${M} ^ ${RSA.e}` },
+    { type:'result', text:`= ${powStr}`, value:powStr },
+    { type:'arrow' },
+    { type:'label',  text:'④ 取模运算' },
+    { type:'calc',   text:`${powStr} mod ${RSA.n}` },
+    { type:'result', text:`= ${C}`, value:C },
+    { type:'arrow' },
+    { type:'label',  text:'⑤ 加密结果' },
+    { type:'final',  text:`C = ${C}`, sub:`密文: ${C}` },
+    { type:'done',   text:'✓ 加密完成 — 点击「解密」继续' },
+  ];
+}
+
+function generateDecryptSteps(C) {
+  const powStr = bigPow(C, RSA.d);
+  const M = modPow(C, RSA.d, RSA.n);
+  const resultChar = M >= 32 && M <= 126 ? String.fromCharCode(M) : '?';
+  return [
+    { type:'header', text:'── 解密过程 ──' },
+    { type:'label',  text:'① 密文输入' },
+    { type:'calc',   text:`使用加密生成的密文` },
+    { type:'result', text:`C = ${C}`, value:C },
+    { type:'arrow' },
+    { type:'label',  text:'② 私钥参数' },
+    { type:'calc',   text:`私钥 (d, n) = (${RSA.d}, ${RSA.n})` },
+    { type:'calc',   text:`解密公式: M = C ^ d mod n` },
+    { type:'arrow' },
+    { type:'label',  text:'③ 幂运算' },
+    { type:'calc',   text:`C ^ d = ${C} ^ ${RSA.d}` },
+    { type:'result', text:`= ${powStr}`, value:powStr },
+    { type:'arrow' },
+    { type:'label',  text:'④ 取模运算' },
+    { type:'calc',   text:`${powStr} mod ${RSA.n}` },
+    { type:'result', text:`= ${M}`, value:M },
+    { type:'arrow' },
+    { type:'label',  text:'⑤ 解密结果' },
+    { type:'final',  text:`M = ${M}`, sub:`明文: ${M} → "${resultChar}"` },
+    { type:'done',   text:'✓ 解密完成' },
+  ];
+}
+
+// ─── Render Steps ────────────────────────────────────────────────────────────
+function renderStep(step) {
+  const div = document.createElement('div');
+  div.className = 'step-line px-3 py-2';
+  switch (step.type) {
+    case 'header':
+      div.innerHTML = `<div class="text-center font-bold text-sm tracking-widest py-2">${step.text}</div>`; break;
+    case 'label':
+      div.innerHTML = `<div class="text-xs font-bold text-gray-500 uppercase tracking-wider mt-2">${step.text}</div>`; break;
+    case 'calc':
+      div.innerHTML = `<div class="text-sm pl-4 text-gray-700" style="word-break:break-all">${step.text}</div>`; break;
+    case 'result':
+      div.innerHTML = `<div class="text-base font-bold pl-4" style="word-break:break-all"><span class="number-animate">${step.text}</span></div>`; break;
+    case 'arrow':
+      div.innerHTML = `<div class="arrow text-center py-1">↓</div>`; break;
+    case 'final':
+      div.innerHTML = `<div class="border-2 border-black p-3 mt-1 bg-gray-50">
+        <div class="text-lg font-bold text-center">${step.text}</div>
+        <div class="text-xs text-gray-500 text-center mt-1">${step.sub}</div>
+      </div>`; break;
+    case 'done':
+      div.innerHTML = `<div class="text-center text-sm font-bold py-3 mt-2">${step.text}</div>`; break;
+  }
+  return div;
+}
+
+// ─── Animation Core ──────────────────────────────────────────────────────────
+async function animateSteps(steps, container) {
+  const els = steps.map(s => { const e = renderStep(s); container.appendChild(e); return e; });
+  const sp = document.createElement('div');
+  sp.style.height = '140px'; sp.className = 'bottom-spacer';
+  container.appendChild(sp);
+
+  for (let i = 0; i < els.length; i++) {
+    currentStepIndex = i;
+    els.forEach((el, j) => { el.classList.remove('current'); if (j < i) el.classList.add('visible'); });
+    els[i].classList.add('visible', 'current', 'fade-in');
+    els[i].scrollIntoView({ behavior:'smooth', block:'center' });
+    const numEl = els[i].querySelector('.number-animate');
+    if (numEl) { numEl.classList.add('pop'); setTimeout(() => numEl.classList.remove('pop'), 400); }
+    const arrEl = els[i].querySelector('.arrow');
+    if (arrEl) arrEl.classList.add('visible');
+    await sleep(1260);
+  }
+  els.forEach(el => { el.classList.remove('current'); el.classList.add('visible'); });
+}
+
+// ─── Encrypt ─────────────────────────────────────────────────────────────────
+async function doEncrypt() {
+  const input = document.getElementById('charInput');
+  const char = input.value.trim().toUpperCase();
+  if (!char || !/^[A-Z]$/.test(char)) {
+    input.focus(); input.style.borderColor = '#f00';
+    setTimeout(() => input.style.borderColor = '#000', 600); return;
+  }
+  const M = char.charCodeAt(0);
+  if (M >= RSA.n) {
+    showToast(`字母 "${char}" 的 ASCII (${M}) ≥ n (${RSA.n})，请更换密钥`); return;
+  }
+  if (isRunning) return;
+  isRunning = true;
+  encryptResult = null; updateDecryptBtn();
+
+  const btnE = document.getElementById('btnEncrypt'), btnD = document.getElementById('btnDecrypt');
+  btnE.classList.add('active-mode'); btnE.style.pointerEvents = 'none'; btnD.style.pointerEvents = 'none';
+
+  const badge = document.getElementById('statusBadge');
+  badge.textContent = '加密中...'; badge.classList.add('blink'); badge.style.background = '#fff';
+
+  const container = document.getElementById('stepsContainer');
+  container.innerHTML = '';
+  const top = document.createElement('div'); top.style.height = '120px'; container.appendChild(top);
+
+  await animateSteps(generateEncryptSteps(char), container);
+
+  const C = modPow(M, RSA.e, RSA.n);
+  encryptResult = { char, M, C };
+  badge.textContent = '加密完成 — 等待解密';
+  badge.classList.remove('blink'); badge.style.background = '#f5f5f5';
+  btnE.classList.remove('active-mode'); btnE.style.pointerEvents = ''; btnD.style.pointerEvents = '';
+  updateDecryptBtn(); isRunning = false;
+}
+
+// ─── Decrypt ─────────────────────────────────────────────────────────────────
+async function doDecrypt() {
+  if (!encryptResult) { showToast('请先加密'); return; }
+  if (isRunning) return;
+  isRunning = true;
+
+  const { char, M, C } = encryptResult;
+  const btnE = document.getElementById('btnEncrypt'), btnD = document.getElementById('btnDecrypt');
+  btnD.classList.add('active-mode'); btnE.style.pointerEvents = 'none'; btnD.style.pointerEvents = 'none';
+
+  const badge = document.getElementById('statusBadge');
+  badge.textContent = '解密中...'; badge.classList.add('blink'); badge.style.background = '#fff';
+
+  const container = document.getElementById('stepsContainer');
+  container.querySelector('.bottom-spacer')?.remove();
+  const sep = document.createElement('div');
+  sep.className = 'step-line px-3 py-4 visible';
+  sep.innerHTML = '<div class="border-t-2 border-black my-2"></div>';
+  container.appendChild(sep);
+
+  await animateSteps(generateDecryptSteps(C), container);
+
+  const M2 = modPow(C, RSA.d, RSA.n);
+  const char2 = M2 >= 32 && M2 <= 126 ? String.fromCharCode(M2) : '?';
+  saveHistory({ char, M, C, M2, char2, time: Date.now() });
+
+  badge.textContent = '加密 + 解密完成';
+  badge.classList.remove('blink'); badge.style.background = '#f5f5f5';
+  btnD.classList.remove('active-mode'); btnE.style.pointerEvents = ''; btnD.style.pointerEvents = '';
+  encryptResult = null; updateDecryptBtn(); isRunning = false;
+}
+
+// ─── Replay ──────────────────────────────────────────────────────────────────
+async function replayFullProcess(h) {
+  if (isRunning) return;
+  isRunning = true;
+  const btnE = document.getElementById('btnEncrypt'), btnD = document.getElementById('btnDecrypt');
+  btnE.style.pointerEvents = 'none'; btnD.style.pointerEvents = 'none';
+
+  const badge = document.getElementById('statusBadge');
+  const container = document.getElementById('stepsContainer');
+  container.innerHTML = '';
+  const top = document.createElement('div'); top.style.height = '120px'; container.appendChild(top);
+
+  badge.textContent = '加密中...'; badge.classList.add('blink'); badge.style.background = '#fff';
+  btnE.classList.add('active-mode');
+  await animateSteps(generateEncryptSteps(h.char), container);
+  btnE.classList.remove('active-mode');
+
+  container.querySelector('.bottom-spacer')?.remove();
+  const sep = document.createElement('div');
+  sep.className = 'step-line px-3 py-4 visible';
+  sep.innerHTML = '<div class="border-t-2 border-black my-2"></div>';
+  container.appendChild(sep);
+
+  badge.textContent = '解密中...';
+  btnD.classList.add('active-mode');
+  await animateSteps(generateDecryptSteps(h.C), container);
+  btnD.classList.remove('active-mode');
+
+  badge.textContent = '回放完成';
+  badge.classList.remove('blink'); badge.style.background = '#f5f5f5';
+  btnE.style.pointerEvents = ''; btnD.style.pointerEvents = '';
+  isRunning = false;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─── Tutorial (dynamic) ──────────────────────────────────────────────────────
+function renderTutorial() {
+  const { p, q, n, e, d, phi } = RSA;
+  const M = 68; // 'D' — always < n (we enforce n > 90 > 68)
+  const C = modPow(M, e, n);
+  const Me = bigPow(M, e);
+  const numLen = bigPow(C, d).length;
+
+  document.getElementById('tutorialContent').innerHTML = `
+    <h1>RSA 加密原理简明指南</h1>
+
+    <h2>1. 核心公式</h2>
+    <p>本游戏基于 RSA 算法的核心数学原理，主要涉及以下三个公式：</p>
+    <div class="formula-block">
+      <span class="formula-line"><code>c &equiv; m<sup>e</sup> mod n</code> &nbsp; 加密：密文 = 明文的 e 次方 对 n 取余</span>
+      <span class="formula-line"><code>m &equiv; c<sup>d</sup> mod n</code> &nbsp; 解密：明文 = 密文的 d 次方 对 n 取余</span>
+      <span class="formula-line"><code>e &times; d &equiv; 1 mod &phi;(n)</code> &nbsp; 密钥关系：公钥与私钥的约束</span>
+    </div>
+
+    <h2>2. 密钥参数是怎么来的？</h2>
+    <p>当前使用的是<strong>自定义教学参数</strong>，所有数值均可在「密钥配置」中修改。</p>
+
+    <div class="step-box">
+      <strong>第一步：选两个质数</strong>
+      当前选择 <code>p = ${p}</code>，<code>q = ${q}</code>
+    </div>
+    <div class="step-box">
+      <strong>第二步：计算模数 n</strong>
+      <code>n = p &times; q = ${p} &times; ${q} = ${n}</code><br>
+      n 是公钥和私钥共用的部分，相当于"锁的大小"。n = ${n} > 90（Z 的 ASCII），确保所有大写字母都能正确加解密。
+    </div>
+    <div class="step-box">
+      <strong>第三步：计算欧拉函数 &phi;(n)</strong>
+      <code>&phi;(n) = (p-1) &times; (q-1) = ${p-1} &times; ${q-1} = ${phi}</code><br>
+      这是一个只有钥匙制造者知道的秘密数字。
+    </div>
+    <div class="step-box">
+      <strong>第四步：生成公钥 e</strong>
+      选择一个与 ${phi} 互质的数，当前 <code>e = ${e}</code>（gcd(${e}, ${phi}) = 1 ✓）<br>
+      公钥 <code>(e, n)</code> 即 <code>(${e}, ${n})</code>，公开给所有人用来加密。
+    </div>
+    <div class="step-box">
+      <strong>第五步：生成私钥 d</strong>
+      寻找 d，使得 <code>(${e} &times; d) mod ${phi} = 1</code>。<br>
+      计算得 <code>d = ${d}</code>（验证：${e} &times; ${d} mod ${phi} = ${(e * d) % phi} ✓）<br>
+      私钥 <code>(d, n)</code> 即 <code>(${d}, ${n})</code>，必须保密，用来解密。
+    </div>
+
+    <h2>3. 加密过程演示</h2>
+    <p>以字母 "D" 为例（ASCII = ${M}）：</p>
+    <ul>
+      <li>原始信息：<code>m = ${M}</code></li>
+      <li>使用公钥：<code>e = ${e}</code>，<code>n = ${n}</code></li>
+      <li>代入公式：<code>c = ${M}<sup>${e}</sup> mod ${n}</code></li>
+      <li>计算幂次：<code>${M}<sup>${e}</sup> = ${Me}</code></li>
+      <li>计算取余：<code>${Me} mod ${n} = ${C}</code></li>
+      <li>最终密文：<code>c = ${C}</code></li>
+    </ul>
+
+    <h2>4. 解密过程演示</h2>
+    <p>接收者收到密文 <code>c = ${C}</code>，只有拥有私钥 d 的人才能还原：</p>
+    <ul>
+      <li>收到密文：<code>c = ${C}</code></li>
+      <li>使用私钥：<code>d = ${d}</code>，<code>n = ${n}</code></li>
+      <li>代入公式：<code>m = ${C}<sup>${d}</sup> mod ${n}</code></li>
+      <li>计算幂次：<code>${C}<sup>${d}</sup></code> 是一个 ${numLen} 位的巨大数字</li>
+      <li>计算取余：<code>...mod ${n} = ${M}</code></li>
+      <li>还原明文：<code>m = ${M}</code> &rarr; 对应字符 "D" ✓</li>
+    </ul>
+
+    <h2>5. 为什么私钥 d 能够解密？</h2>
+    <p>这是 RSA 最精妙的地方。为什么用 e 加密后，再用 d 运算就能变回原样？</p>
+    <div class="highlight">
+      <strong>数学本质：欧拉定理</strong><br>
+      根据数论中的欧拉定理，当 m 与 n 互质时，<code>m<sup>&phi;(n)</sup> &equiv; 1 mod n</code>。
+    </div>
+    <ul>
+      <li><strong>密钥的魔法</strong> &mdash; 设计密钥时保证了 <code>e &times; d &equiv; 1 mod &phi;(n)</code>（当前：${e} &times; ${d} mod ${phi} = 1）。</li>
+      <li><strong>还原过程</strong> &mdash; 解密实际上是 <code>(m<sup>e</sup>)<sup>d</sup> = m<sup>ed</sup> = m<sup>k&times;&phi;(n)+1</sup></code>，根据欧拉定理化简为 <code>m<sup>1</sup> = m</code>。</li>
+      <li><strong>结论</strong> &mdash; 只有知道 &phi;(n)（即知道 p 和 q）的人才能算出 d。只要 p、q 足够大，分解 n 就极其困难。</li>
+    </ul>
+
+    <h2>6. 注意事项</h2>
+    <ul>
+      <li>当前参数：p=${p}, q=${q}, n=${n}，可在「⚙️ 密钥配置」中修改。</li>
+      <li>要求 n > 90，确保所有大写字母 A-Z（ASCII 65-90）都可正确加解密。</li>
+      <li>真实的 RSA 加密中，n 通常是 <strong>2048 位以上</strong>的超大整数。</li>
+    </ul>
+  `;
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+_setKeyValid();
+updateHeaderSub();
+renderTutorial();
+updateDecryptBtn();
+renderHistory();
+document.getElementById('charInput').focus();
+</script>
+</body>
+</html>
